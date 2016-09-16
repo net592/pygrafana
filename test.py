@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-from pygrafana import *
+from pygrafana.dashboard import *
 
 # Create a target for testmetric
 t = Target("testmetric")
