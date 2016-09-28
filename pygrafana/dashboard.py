@@ -7,6 +7,14 @@ import re
 # s (seconds), m (minutes), h (hours), d (days), w (weeks), M (months), y (years
 time_limits = { "s" : 60, "m" : 60, "h" : 24, "d" : 31, "w": 52, "M" : 12, "y" : 100}
 def check_timerange(t):
+    """
+    Checks a timerange string for validity
+    
+    Checks if string is anything like now-1h, or now-6h/h up to a date like 2016-09-17 04:31:00
+    
+    :param t: timerange string
+    :return True/False
+    """
     if isinstance(t, str):
         if time == "now":
             return True
@@ -28,6 +36,12 @@ def check_timerange(t):
     return False
 
 def check_color(c):
+    """
+    Checks a color string or tuple with numeric values
+    
+    :param c: Color string or tuple
+    :return c or None
+    """
     if isinstance(c, str):
         m = re.match("rgba\((\d+),\s*(\d+),\s*(\d+),\s*(0.[\d]+)\)", c)
         if m and int(m.group(1)) < 255 and int(m.group(2)) < 255 and int(m.group(3)) < 255 and float(m.group(4)) > 0 and float(m.group(4)) <= 1:
@@ -53,8 +67,23 @@ def check_color(c):
 target_id = 0
 
 class Target(object):
+    """
+    Encapsulates an query and evaluation target used in Grafana's panels
+    """
     def __init__(self, measurement, dsType="influxdb", alias="", tags=[],
                   groupBy=[], select=[], query="", resultFormat="time_series"):
+        """
+        Construct a new Target object
+        
+        :param measurement: The name of the measurement
+        :param dsType: String with the identifier for a supported data source
+        :param alias: Alias in the panel's legend for this target
+        :param tags: List of tags (Format: {{'key': DB key as string, 'value': DB value as string, 'operator': any valid operator as string, 'condition': any valid conditon as string})
+        :param groupBy: List of grouping options (Format: {'type': any of ('fill', 'time', 'tag'), 'params': [parameter(s) for type, e.g. tag name]})
+        :param select: Which elements in a measurement should be returned and further processed. (Format: {'type': 'field' or any valid function, 'params': [parameter(s) for type, e.g. 'value' if type == 'field' or function argument]})
+        :param query: Query that is send to the data source. Not required for InfluxDB but probably the Graphite query is in here.
+        :param resultFormat: Currently the only supported option is 'time_series'. There are others but not implemented yet.
+        """
         self.dsType = dsType
         self.tags = tags
         self.groupBy = groupBy
@@ -66,7 +95,15 @@ class Target(object):
         self.refId = target_id
         target_id += 1
         self.resultFormat = resultFormat
+        self.validGroupBy = ['fill', 'time', 'tag']
+        self.validResultFormat = ["time_series"]
     def get(self):
+        """
+        Returns a dictionary with the Target object's configuration. Performs some sanitation like removing duplicated groupBy options
+        and creates a valid query for InfluxDB based on the configuration.
+        
+        :return dict with the Target object's settings
+        """
         t = None
         t = {}
         t["dsType"] = self.dsType
@@ -136,56 +173,235 @@ class Target(object):
         
         return t
     def get_json(self):
+        """
+        Returns a JSON string with the Target object's configuration.
+        
+        :return JSON string with the Target object's settings
+        """
         return json.dumps(self.get())
     def __str__(self):
         return str(self.get())
     def __repr__(self):
-        return str(self.get())
-    def set_dsType(self, dsType):
-        self.dsType = str(dsType)
-    def set_refId(self, refId):
-        self.refId = refId
-    def set_alias(self, alias):
-        self.alias = str(alias)
-    def set_resultFormat(self, fmt):
-        self.resultFormat = fmt
-    def add_tag(self, key, value, operator='=', condition='AND'):
-        val = value
-        if val[0] == "$" and val[-1] != "$":
-            val += "$"
+        t = self.get()
+        s = "Target(%s, dsType=\"%s\", alias=\"%s\", " % (t.measurement, t.dsType, t.alias,)
         
-        if operator in ["=~", "!~"]:
-            if val[0] != "/":
-                val = "/"+val
-            if val[-1] != "/":
-                val += "/"
-        if len(self.tags) == 0:
-            tag = {'key': key, 'value': val, 'operator': operator}
-        else:
-            tag = {'key': key, 'value': val, 'operator': operator, 'condition': condition}
-        self.tags.append(tag)
-    def add_select(self, sel_type, sel_params):
-        if not { "params": sel_params, "type": sel_type } in select:
-            self.select.append({ "params": sel_params, "type": sel_type })
+        s += "tags=[%s], " % (", ".join([str(a) for a in t.tags]),)
+        s += "groupBy=[%s], " % (", ".join([str(g) for g in t.groupBy]),)
+        s += "select=[%s], " % (", ".join([str(s) for s in t.select]),)
+        s += "query=\"%s\", resultFormat=\"%s\"" % (t.query, t.resultFormat,)
+        return s
+    def set_dsType(self, dsType):
+        """
+        Set data source type.
+        
+        :param dsType: Valid identifier string for Grafana data source types. Currently no validity checks
+        :return True/False
+        """
+        if not isinstance(dsType, str):
+            try:
+                dsType = str(dsType)
+            except ValueError:
+                return False
+        self.dsType = dsType
+        return True
+    def set_refId(self, refId):
+        """
+        Set reference identifier (refId).
+        
+        :param refId: Reference identifier string(!) like 'A','B'
+        :return True/False
+        """
+        if not isinstance(refId, str):
+            try:
+                refId = str(refId)
+            except ValueError:
+                return False
+        self.refId = refId
+        return True
+    def set_alias(self, alias):
+        """
+        Set alias for this Target in panel's legend.
+        
+        TODO: Warn if alias contains [[tag_<tagname>]] but no valid entry in groupBy exists
+        
+        :param alias: Alias for this Target
+        :return True/False
+        """
+        if not isinstance(alias, str):
+            try:
+                alias = str(alias)
+            except ValueError:
+                return False
+        self.alias = alias
+        return True
+    def set_resultFormat(self, fmt):
+        """
+        Set result format for this Target.
+        
+        TODO: Add missing valid result formats
+        
+        :param fmt: Result format. Currently only "time_series" allowed
+        :return True/False
+        """
+        if fmt in self.validResultFormat:
+            self.resultFormat = fmt
+            return True
+        return False
+    def add_tag(self, key, value, operator='=', condition='AND'):
+        """
+        Add a tag to this target.
+        Performs some sanitation by adding missing trailing $ for dashboard tags or add missing / around the value if operator is a regex operator.
+        
+        :param key: DB key
+        :param value: DB value
+        :param operator: A valid operator like '=' or '=~'
+        :param condition: A valid condition like 'AND' or 'OR'
+        :return True/False
+        """
+        try:
+            val = value
+            if val[0] == "$" and val[-1] != "$":
+                val += "$"
             
+            if operator in ["=~", "!~"]:
+                if val[0] != "/":
+                    val = "/"+val
+                if val[-1] != "/":
+                    val += "/"
+            if len(self.tags) == 0:
+                tag = {'key': key, 'value': val, 'operator': operator}
+            else:
+                tag = {'key': key, 'value': val, 'operator': operator, 'condition': condition}
+            self.tags.append(tag)
+            return True
+        except:
+            pass
+        return False
+    def add_select(self, sel_type, sel_params):
+        """
+        Add a select configuration for this Target. Duplicated additions are discarded
+        
+        :param sel_type: Type of select like 'field' or any valid function
+        :param sel_params: Parameters of select like 'value' for 'field' or function arguments. If parameter is not a list, the parameter is put in one.
+        :return True/False
+        """
+        if not isinstance(sel_type, list):
+            sel_type = [sel_type]
+        s = { "params": sel_params, "type": sel_type }
+        if not s in select:
+            self.select.append(s)
+            return True
+        return False
     def add_groupBy(self, grp_type, grp_params):
-        found = False
-        for g in self.groupBy:
-            if g["type"] == grp_type:
-                g["params"] = grp_params
-                found = True
-        if not found:
-            self.groupBy.append({'type': grp_type, 'params': grp_params})
+        """
+        Add a groupBy configuration for this Target. Duplicated additions are discarded
+        
+        :param sel_type: Type of groupBy options. Valid types are 'fill', 'time' and 'tag'.
+        :param sel_params: Parameter to the groupBy type. 
+        :return True/False
+        """
+        if grp_type not in self.validGroupBy:
+            return False
+        if grp_type != 'tag':
+            for g in self.groupBy:
+                if g["type"] == grp_type:
+                    g["params"] = grp_params
+                    return True
+        d = {'type': grp_type, 'params': grp_params}
+        if d not in self.groupBy:
+            self.groupBy.append(d)
+            return True
+        return False
+    def read_json(self, j):
+        """
+        Configure Target object according to settings in JSON document describing a Target
+        
+        :param sel_type: Type of groupBy options. Valid types are 'fill', 'time' and 'tag'.
+        :param sel_params: Parameter to the groupBy type. 
+        :return True/False
+        """
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("resultFormat"):
+            self.set_resultFormat(j["resultFormat"])
+        if j.has_key("alias"):
+            self.set_alias(j["alias"])
+        if j.has_key("refId"):
+            self.set_refId(j["refId"])
+        if j.has_key("dsType"):
+            self.set_dsType(j["dsType"])
+        if j.has_key("query"):
+            self.query = j["query"]
+        if j.has_key("measurement"):
+            self.measurement = j["measurement"]
+        if j.has_key("tags"):
+            if isinstance(j["tags"], list):
+                for t in j["tags"]:
+                    key = None
+                    value = None
+                    operator = "="
+                    if t.has_key("key") and t.has_key("value"):
+                        key = t["key"]
+                        value = t["value"]
+                    else:
+                        print "Invalid tag %s, Format is {'key': '', 'value': '', 'operator': '', 'condition': ''}" % str(t)
+                        continue
+                    if t.has_key("operator"):
+                        operator = t["operator"]
+                    if t.has_key("condition"):
+                        self.add_tag(key, value, operator=operator, condition=t["condition"])
+                    else:
+                        self.add_tag(key, value, operator=operator)
+        if f.has_key("groupBy"):
+            if isinstance(j["groupBy"], list):
+                for gb in j["groupBy"]:
+                    t = None
+                    p = None
+                    if gb.has_key("type"):
+                        t = gb["type"]
+                    if gb.has_key("params"):
+                        p = gb["params"]
+                    if not t or not p:
+                        print "Invalid groupBy JSON %s, Format is {'type': '', 'params': []}" % str(gb)
+                        continue
+                    if not isinstance(p, list):
+                        print "Invalid groupBy JSON %s, Format is {'type': '', 'params': []}" % str(gb)
+                        continue
+                    self.add_groupBy(t, p)
+        if f.has_key("select"):
+            if isinstance(j["select"], list):
+                for sel in j["select"]:
+                    t = None
+                    p = None
+                    if sel.has_key("type"):
+                        t = gb["type"]
+                    if sel.has_key("params"):
+                        p = gb["params"]
+                    if not t or not p:
+                        print "Invalid select JSON %s, Format is {'type': '', 'params': []}" % str(sel)
+                        continue
+                    if not isinstance(p, list):
+                        print "Invalid select JSON %s, Format is {'type': '', 'params': []}" % str(sel)
+                        continue
+                    self.add_select(t, p)
+        
 
 class Tooltip(object):
+    """
+    Encapsulates tooltip configuration used in Grafana's graph panels
+    """
     def __init__(self, shared=True, value_type="cumulative"):
         self.shared = shared
         self.value_type = value_type
+        self.validValueTypes = ["cumulative"]
     def set_shared(self, s):
         if isinstance(s, bool):
             self.shared = s
     def set_value_type(self, v):
-        self.value_type = v
+        if isinstance(v, str) and v in self.validValueTypes:
+            self.value_type = v
+            return True
+        return False
     def get(self):
         return {"shared" : self.shared, "value_type" : self.value_type}
     def get_json(self):
@@ -193,7 +409,14 @@ class Tooltip(object):
     def __str__(self):
         return str(self.get())
     def __repr__(self):
-        return str(self.get())
+        return "Tooltip(shared=%s, value_type=\"%s\")" % (str(self.shared), self.value_type)
+    def read_json(self, j):
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("shared"):
+            self.set_shared(j["shared"])
+        if j.has_key("value_type"):
+            self.set_value_type(j["value_type"])
 
 class Legend(object):
     def __init__(self, total=False, show=True, max=False, min=False, current=False, values=False, avg=False):
@@ -234,7 +457,26 @@ class Legend(object):
     def __str__(self):
         return str(self.get())
     def __repr__(self):
-        return str(self.get())
+        l = "Legend(total=%s, show=%s, max=%s, " % (self.total, self.show, self.max,)
+        l += "min=%s, current=%s, values=%s, avg=%s)" % (self.min, self.current, self.values, self.avg,)
+        return l
+    def read_json(self, j):
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("total"):
+            self.set_total(j["total"])
+        if j.has_key("show"):
+            self.set_show(j["show"])
+        if j.has_key("max"):
+            self.set_max(j["max"])
+        if j.has_key("min"):
+            self.set_min(j["min"])
+        if j.has_key("current"):
+            self.set_current(j["current"])
+        if j.has_key("values"):
+            self.set_values(j["values"])
+        if j.has_key("avg"):
+            self.set_avg(j["avg"])
 
 class Grid(object):
     def __init__(self, leftMax=None, threshold2=None, rightLogBase=1, rightMax=None, threshold1=None,
@@ -262,6 +504,29 @@ class Grid(object):
         return str(self.get())
     def __repr__(self):
         return str(self.get())
+    def read_json(self, j):
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("leftMax"):
+            self.set_leftMax(j["leftMax"])
+        if j.has_key("threshold2"):
+            self.set_threshold2(j["threshold2"])
+        if j.has_key("rightLogBase"):
+            self.set_rightLogBase(j["rightLogBase"])
+        if j.has_key("rightMax"):
+            self.set_rightMax(j["rightMax"])
+        if j.has_key("threshold1"):
+            self.set_threshold1(j["threshold1"])
+        if j.has_key("leftLogBase"):
+            self.set_leftLogBase(j["leftLogBase"])
+        if j.has_key("threshold2Color"):
+            self.set_threshold2Color(j["threshold2Color"])
+        if j.has_key("rightMin"):
+            self.set_rightMin(j["rightMin"])
+        if j.has_key("threshold1Color"):
+            self.set_threshold1Color(j["threshold1Color"])
+        if j.has_key("leftMin"):
+            self.set_leftMin(j["leftMin"])
 
 panel_id = 0
 
@@ -291,6 +556,8 @@ class Panel(object):
         return str(self.get())
     def __repr__(self):
         return str(self.get())
+    def read_json(self, j):
+        pass
 
 class TextPanel(Panel):
     def __init__(self, title="default title", mode="markdown", content="",
@@ -316,7 +583,26 @@ class TextPanel(Panel):
     def __str__(self):
         return str(self.get())
     def __repr__(self):
-        return str(self.get())
+        p = "Textpanel(title=\"%s\", mode=\"%s\", content=\"%s\", " % (self.title, str(self.mode), self.content,)
+        p += "style=%s, span=%d, editable=%s)"    % (str(self.style), int(self.span), str(self.editable),)
+        return p
+    def read_json(self, j):
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("title"):
+            self.set_title(j["title"])
+        if j.has_key("mode"):
+            self.set_mode(j["mode"])
+        if j.has_key("content"):
+            self.set_content(j["content"])
+        if j.has_key("style"):
+            self.set_style(j["style"])
+        if j.has_key("span"):
+            self.set_span(j["span"])
+        if j.has_key("editable"):
+            self.set_editable(j["editable"])
+        if j.has_key("id"):
+            self.id = j["id"]
 
 class PlotPanel(Panel):
     def __init__(self, targets=[], datasource="", title="", error=False,
@@ -333,7 +619,6 @@ class PlotPanel(Panel):
     def set_error(self, b):
         if isinstance(b, bool):
             self.error = b  
-    
     def set_datasource(self, d):
         if isinstance(d, str):
             self.datasource = d
@@ -345,6 +630,38 @@ class PlotPanel(Panel):
         if isinstance(t, Target):
             x = copy.deepcopy(t)
             self.targets.append(x)
+    def get(self):
+        return {"datasource" : self.datasource, "title" : self.title,
+                "error" : self.error, "isNew" : self.isNew,
+                "span" : self.span, "editable": self.editable,
+                "id": self.id, "targets" : [t.get() for t in self.targets ]}
+    def __str__(self):
+        return str(self.get())
+    def __repr__(self):
+        p = "PlotPanel(targets=%s, datasource=\"%s\", " % (str([t.__repr__() for t in self.targets ]), self.datasource, )
+        p += "title=\"%s\", error=%s, " % (self.title, str(self.error), )
+        p += "editable=%s, isNew=%s, " % (str(self.editable), str(self.isNew), )
+        p += "links=%s, span=%d)"  % (str(self.links), int(span), )
+        return p
+    def read_json(self, j):
+        if isinstance(j, str):
+            j = json.loads(j)
+        if j.has_key("datasource"):
+            self.set_datasource(j["datasource"])
+        if j.has_key("title"):
+            self.set_title(j["title"])
+        if j.has_key("error"):
+            self.set_error(j["error"])
+        if j.has_key("isNew"):
+            self.set_isNew(j["isNew"])
+        if j.has_key("links"):
+            self.set_links(j["links"])
+        if j.has_key("span"):
+            self.set_span(j["span"])
+        if j.has_key("editable"):
+            self.set_editable(j["editable"])
+        if j.has_key("id"):
+            self.id = j["id"]
     
 
 class SeriesOverride(object):
