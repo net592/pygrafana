@@ -482,6 +482,7 @@ class Grid(object):
     def __init__(self, leftMax=None, threshold2=None, rightLogBase=1, rightMax=None, threshold1=None,
                     leftLogBase=1, threshold2Color="rgba(234, 112, 112, 0.22)",rightMin=None,
                     threshold1Color="rgba(216, 200, 27, 0.27)", leftMin=None):
+        self.validLogBases = [1, 2, 10, 32, 1024]
         self.leftMax = leftMax
         self.threshold2 = threshold2
         self.rightLogBase = rightLogBase
@@ -528,7 +529,7 @@ class Grid(object):
         if j.has_key("leftMin"):
             self.set_leftMin(j["leftMin"])
 
-panel_id = 0
+panel_id = 1
 
 
 
@@ -543,11 +544,18 @@ class Panel(object):
     def set_editable(self, b):
         if isinstance(b, bool):
             self.editable = b
-    def set_title(self, t):
-        self.title = str(t)
-    def set_span(self, b):
-        if isinstance(b, int) and b in range(1,13):
-            self.span = b
+            return True
+        return False
+    def set_title(self, title):
+        if isinstance(title, str):
+            self.title = title
+            return True
+        return False
+    def set_span(self, span):
+        if isinstance(span, int) and span in range(1,13):
+            self.span = span
+            return True
+        return False
     def get(self):
         return {}
     def get_json(self):
@@ -561,34 +569,124 @@ class Panel(object):
 
 class TextPanel(Panel):
     def __init__(self, title="default title", mode="markdown", content="",
-                       style={}, span=12, editable=True):
+                       style={}, span=12, editable=True, error=False,
+                       links=[], transparent=False, repeat=None, minSpan=None):
         Panel.__init__(self, span=span, editable=editable, title=title)
         self.set_mode(mode)
-        self.content = content
+        self.set_content(content)
         self.style = style
+        self.set_error(error)
+        self.set_repeat(repeat)
+        if isinstance(links, list):
+            self.links = []
+            for l in links:
+                if l["type"] == "absolute":
+                    self.add_link(title=l["title"], typ="absolute", url=l["url"])
+                elif l["type"] == "dashboard":
+                    self.add_link(title=l["title"], typ="dashboard", dashboard=l["dashboard"])
+                
+        self.set_transparent(transparent)
+        self.set_minSpan(minSpan)
         self.type = 'text'
     def set_mode(self, m):
         if m in ['html', 'markdown', 'text']:
             self.mode = m
-    def set_content(self, c):
-        if isinstance(c, str):
-            self.content = c
+            return True
+        return False
+    def set_title(self, title):
+        if isinstance(title, str):
+            self.title = title
+            return True
+        return False
+    def set_content(self, content):
+        if isinstance(content, str):
+            self.content = content
+            return True
+        return False
+    def set_error(self, error):
+        if isinstance(error, bool):
+            self.error = error
+            return True
+        return False
+    def set_transparent(self, transparent):
+        if isinstance(transparent, bool):
+            self.transparent = transparent
+            return True
+        return False
+    def set_minSpan(self, minSpan):
+        if minSpan == None or isinstance(minSpan, int):
+            self.minSpan = minSpan
+            return True
+        return False
+    def set_repeat(self, repeat):
+        if repeat == None or isinstance(repeat, str):
+            self.repeat = repeat
+            return True
+        return False
+    def set_style(self, style):
+        if isinstance(style, dict):
+            self.style = style
+            return True
+        return False
+    def add_link(self, title="", typ="dashboard", url=None, dashboard=None):
+        if typ not in ["absolute", "dashboard"]:
+            print "Invalid link type"
+            return False
+        if typ == "absolute" and not url:
+            print "For type 'absolute' an url is required"
+            return False
+        elif typ == "absolute":
+            self.links.append({
+              "type": typ,
+              "url": url,
+              "title": title,
+              
+            })
+        if typ == "dashboard" and not dashboard:
+            print "For type 'dashboard' a dashboard name is required"
+            return False
+        elif typ == "dashboard":
+            self.links.append({
+              "type": typ,
+              "dashboard": dashboard,
+              "title": title,
+              "dashUri" : "db/"+dashboard.lower().replace("_","-")
+            })
+        return True
     def get(self):
         return {"title" : self.title, "mode" : self.mode,
                 "content" : self.content, "style" : self.style,
                 "span" : self.span, "editable": self.editable,
-                "id": self.id}
+                "id": self.id, "type" : self.type,"error": self.error,
+                "links" : self.links, "transparent" : self.transparent,
+                "repeat" : self.repeat, "minSpan" : self.minSpan}
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
         return str(self.get())
     def __repr__(self):
+        links = ""
+        for l in self.links:
+            if l["type"] == "absolute":
+                links += "{\"type\" : \"absolute\", \"title\" : \"%s\", \"url\" : \"%s\"}" % (l["title"], l["url"],)
+            elif l["type"] == "dashboard":
+                links += "{\"type\" : \"dashboard\", \"title\" : \"%s\", \"dashboard\" : \"%s\"}" % (l["title"], l["dashboard"],)
         p = "Textpanel(title=\"%s\", mode=\"%s\", content=\"%s\", " % (self.title, str(self.mode), self.content,)
-        p += "style=%s, span=%d, editable=%s)"    % (str(self.style), int(self.span), str(self.editable),)
+        p += "style=%s, span=%d, editable=%s, " % (str(self.style), int(self.span), str(self.editable),)
+        p += "links=[%s], transparent=%s, " % (links, str(self.transparent), )
+        if self.repeat:
+            p += "repeat=\"%s\", " % str(self.repeat)
+        else:
+            p += "repeat=None, "
+        p += "minSpan=%s)" % str(self.minSpan)
         return p
     def read_json(self, j):
         if isinstance(j, str):
             j = json.loads(j)
+        if j.has_key("type"):
+            if j["type"] != 'text':
+                print "No TextPanel"
+                return False
         if j.has_key("title"):
             self.set_title(j["title"])
         if j.has_key("mode"):
@@ -601,8 +699,21 @@ class TextPanel(Panel):
             self.set_span(j["span"])
         if j.has_key("editable"):
             self.set_editable(j["editable"])
+        if j.has_key("transparent"):
+            self.set_transparent(j["transparent"])
+        if j.has_key("repeat"):
+            self.set_repeat(j["repeat"])
+        if j.has_key("minSpan"):
+            self.set_repeat(j["minSpan"])
+        if j.has_key("links"):
+            for l in j["links"]:
+                if l["type"] == "absolute":
+                    self.add_link(title=l["title"], typ="absolute", url=l["url"])
+                elif l["type"] == "dashboard":
+                    self.add_link(title=l["title"], typ="dashboard", dashboard=l["dashboard"])
         if j.has_key("id"):
             self.id = j["id"]
+        return True
 
 class PlotPanel(Panel):
     def __init__(self, targets=[], datasource="", title="", error=False,
@@ -768,25 +879,35 @@ class SeriesOverride(object):
         return str(self.get())
 
 
-class Graph(PlotPanel):
-    def __init__(self, bars=False, timeFrom=None, links=[], isNew=True, nullPointMode="connected",
+class GraphPanel(PlotPanel):
+    def __init__(self, bars=False, links=[], isNew=True, nullPointMode="connected",
                        renderer="flot", linewidth=2, steppedLine=False, fill=0,
                        span=12, title="", tooltip=Tooltip(), targets=[],
                        seriesOverrides=[], percentage=False, xaxis=True,
                        error=False, editable=True, stack=False, yaxis=True,
                        timeShift=None, aliasColors={}, lines=True, points=False,
                        datasource="", pointradius=5, y_formats=[], legend=Legend(),
-                       leftYAxisLabel=None, rightYAxisLabel=None, grid=Grid()):
+                       leftYAxisLabel=None, rightYAxisLabel=None, grid=Grid(),
+                       transparent=False, hideTimeOverride=False, timeFrom=None):
+        self.validYFormats = ['bytes', 'kbytes', 'mbytes', 'gbytes', 'bits',
+                              'bps', 'Bps', 'short', 'joule', 'watt', 'kwatt',
+                              'watth', 'ev', 'amp', 'volt'
+                              'none', 'percent', 'ppm', 'dB', 'ns', 'us',
+                              'ms', 's', 'hertz', 'pps',
+                              'celsius', 'farenheit', 'humidity',
+                              'pressurembar', 'pressurehpa',
+                              'velocityms', 'velocitykmh', 'velocitymph', 'velocityknot']
+        self.validNullPointMode = ["connected", 'null as zero', 'null']
+        self.validRenderer = ["png", "flot"]
         PlotPanel.__init__(self, title=title, isNew=isNew, targets=targets, links=links,
                          datasource=datasource, error=error, span=span, editable=editable)
         self.type = "graph"
         self.set_bars(bars)
-        self.timeFrom = timeFrom
-        self.nullPointMode = nullPointMode
-        self.renderer = renderer
-        self.linewidth = linewidth
+        self.set_nullPointMode(nullPointMode)
+        self.set_renderer(renderer)
+        self.set_linewidth(linewidth)
         self.set_steppedLine(steppedLine)
-        self.fill = fill
+        self.set_fill(fill)
         self.seriesOverrides = seriesOverrides
         self.set_percentage(percentage)
         self.set_xaxis(xaxis)
@@ -795,56 +916,121 @@ class Graph(PlotPanel):
         self.legend = legend
         self.set_stack(stack)
         self.set_yaxis(yaxis)
-        self.timeShift = timeShift
         self.aliasColors = aliasColors
         self.set_lines(lines)
         self.set_points( points)
         self.set_pointradius(pointradius)
-        self.validYFormats = ['bytes', 'bits', 'bps', 'Bps', 'short', 'joule', 'watt', 'ev', 'none']
-        self.y_formats = y_formats
+        self.set_hideTimeOverride(hideTimeOverride)
+        self.set_transparent(transparent)
+        self.set_timeShift(timeShift)
+        self.set_timeFrom(timeFrom)
+        
+        left = 'short'
+        right = 'short'
+        if len(y_formats) > 0:
+            left = y_formats[0]
+        if len(y_formats) > 1:
+            right = y_formats[1]
+        self.set_y_formats(left, right)
         self.leftYAxisLabel = leftYAxisLabel
         self.rightYAxisLabel = rightYAxisLabel
     def set_nullPointMode(self, m):
-        if m in ["connected", 'null as zero']:
+        if m in self.validNullPointMode:
             self.nullPointMode = m
+            return True
+        return False
     def add_seriesOverride(self, b):
         if isinstance(b, SeriesOverride):
             self.seriesOverride.append(b)
-    def set_bars(self, b):
-        if isinstance(b, bool):
-            self.bars = b
+            return True
+        return False
+    def set_bars(self, bars):
+        if isinstance(bars, bool):
+            self.bars = bars
+            return True
+        return False
+    def set_timeFrom(self, timeFrom):
+        if timeFrom == None or (isinstance(timeFrom, str) and timeFrom[-1] in time_limits.keys()):
+            self.timeFrom = timeFrom
+            return True
+        return False
+    def set_timeShift(self, timeShift):
+        if timeShift == None or (isinstance(timeShift, str) and timeShift[-1] in time_limits.keys()):
+            self.timeShift = timeShift
+            return True
+        return False
+    def set_hideTimeOverride(self, hideTimeOverride):
+        if isinstance(hideTimeOverride, bool):
+            self.hideTimeOverride = hideTimeOverride
+            return True
+        return False
     def set_steppedLine(self, b):
         if isinstance(b, bool):
             self.steppedLine = b
+            return True
+        return False
+    def set_transparent(self, transparent):
+        if isinstance(transparent, bool):
+            self.transparent = transparent
+            return True
+        return False
     def set_percentage(self, b):
         if isinstance(b, bool):
             self.percentage = b
+            return True
+        return False
     def set_xaxis(self, b):
         if isinstance(b, bool):
             self.xaxis = b
+            return True
+        return False
     def set_yaxis(self, b):
         if isinstance(b, bool):
             self.yaxis = b
+            return True
+        return False
     def set_stack(self, b):
         if isinstance(b, bool):
             self.stack = b
+            return True
+        return False
     def set_lines(self, b):
         if isinstance(b, bool):
             self.lines = b
+            return True
+        return False
     def set_points(self, b):
         if isinstance(b, bool):
             self.points = b
+            return True
+        return False
     def set_linewidth(self, b):
         if isinstance(b, int):
             self.linewidth = b
+            return True
+        return False
     def set_fill(self, b):
         if isinstance(b, int):
             self.fill = b
+            return True
+        return False
+    def set_renderer(self, renderer):
+        if isinstance(renderer, str) and renderer in self.validRenderer:
+            self.renderer = renderer
+            return True
+        return False
     def set_y_formats(self, left, right):
+        retl = False
+        retr = False
+        if not self.y_formats:
+            self.y_formats= ('short', 'short')
         if left in self.validYFormats:
             self.y_formats[0] = left
+            retl = True
         if right in self.validYFormats:
             self.y_formats[1] = right
+            retr = True
+        return ret
     def set_pointradius(self, b):
         if isinstance(b, int):
             self.pointradius = b
@@ -873,7 +1059,8 @@ class Graph(PlotPanel):
                 "y-axis" : self.yaxis, "timeShift" : self.timeShift,
                 "aliasColors" : self.aliasColors, "lines" : self.lines,
                 "points" : self.points, "datasource" : self.datasource,
-                "pointradius" : self.pointradius, "y_formats" : yfmt}
+                "pointradius" : self.pointradius, "y_formats" : yfmt,
+                "transparent" : self.transparent}
         if self.leftYAxisLabel:
             g.update({"leftYAxisLabel" : self.leftYAxisLabel})
         if self.rightYAxisLabel:
@@ -1132,13 +1319,22 @@ class SingleStat(PlotPanel):
                  "valueFontSize": self.valueFontSize, "valueName": self.valueName,
                  "valueMaps": vmaps }
 
+# TODO Check for dashboard validity:
+#   - Repeat string for Row and Panels must be valid template name
+#   - Template: add 'useTags' and others only if type == 'query'
+#   - Warn if repeat template has multi == False
+
 class Row(object):
-    def __init__(self, title="", panels=[], editable=False, collapse=False, height="250px"):
-        self.title = title
-        self.panels = panels
-        self.editable = editable
-        self.collapse = collapse
-        self.height = height
+    def __init__(self, title="", panels=[], editable=True, collapse=False, height="250px", showTitle=False, repeat=None):
+        self.set_title(title)
+        self.panels = []
+        for p in panels:
+            self.add_panel(p)
+        self.set_editable(editable)
+        self.set_collapse(collapse)
+        self.set_height(height)
+        self.set_showTitle(showTitle)
+        self.set_repeat(repeat)
     def set_title(self, t):
         if not isinstance(t, str):
             try:
@@ -1148,23 +1344,36 @@ class Row(object):
                 return False
         self.title = t
         return True
-    def set_height(self, h):
-        if not isinstance(h, str):
+    def set_height(self, height):
+        if not isinstance(height, str):
             try:
-                h = str(h)
+                height = str(height)
             except ValueError:
                 print "Height must be stringifyable"
                 return False
-        self.height = h
+        if not re.match("\d+px", height) and not re.match("\d+[cm]*", height):
+            print "Height not valid"
+            return False
+        self.height = height
         return True
-    def set_editable(self, b):
-        if isinstance(b, bool):
-            self.editable = b
+    def set_repeat(self, repeat):
+        if repeat == None or isinstance(repeat, str):
+            self.repeat = repeat
             return True
         return False
-    def set_collapse(self, b):
-        if isinstance(b, bool):
-            self.collapse = b
+    def set_editable(self, editable):
+        if isinstance(editable, bool):
+            self.editable = editable
+            return True
+        return False
+    def set_collapse(self, collapse):
+        if isinstance(collapse, bool):
+            self.collapse = collapse
+            return True
+        return False
+    def set_showTitle(self, showTitle):
+        if isinstance(showTitle, bool):
+            self.showTitle = showTitle
             return True
         return False
     def add_panel(self, p):
@@ -1176,7 +1385,7 @@ class Row(object):
     def get(self):
         return {'title': self.title, 'panels': [ p.get() for p in self.panels ],
                 'editable': self.editable, 'collapse': self.collapse,
-                'height': self.height}
+                'height': self.height, 'repeat' : self.repeat}
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
@@ -1190,9 +1399,6 @@ class Row(object):
     def set_datasource(self, d):
         for p in self.panels:
             p.set_datasource(d)
-    def set_height(self, h):
-        if re.match("\d+px"):
-            self.height = h
     def read_json(self, j):
         if not isinstance(j, dict):
             j = json.loads(j)
@@ -1226,77 +1432,140 @@ class Row(object):
 class Template(object):
     def __init__(self, name, value, multi=True, allFormat="regex wildcard",
                        refresh=True, options=[], current={}, datasource="", tags=[],
-                       type="query", multiFormat="regex values", includeAll=False):
-        self.multi = multi
+                       type="query", multiFormat="regex values", includeAll=False,
+                       label=None, hideLabel=False, auto_count=None, auto=False,
+                       useTags=False, tagsQuery="", tagValuesQuery=""):
+        self.validAllFormats = ["regex wildcard", "glob"]
+        self.validMultiFormats = ["regex values", "glob"]
+        self.validTypes = ["query", "interval", "custom"]
+        self.validAutoCounts = [3, 5, 10, 30, 50, 100, 200]
+        self._set_name_and_value(name, value)
+        self.set_multi(multi)
+        self.set_allFormat(allFormat)
+        self.set_refresh(refresh)
+        self.options = []
+        for o in options:
+            self.add_option(o)
+        self.current = current
+        self.set_datasource(datasource)
+        self.tags = []
+        for t in tags:
+            self.add_tag(t)
+        self.set_type(type)
+        self.set_multiFormat(multiFormat)
+        self.set_includeAll(includeAll)
+        self.set_label(label)
+        self.set_hideLabel(hideLabel)
+        self.set_auto(auto)
+        self.set_autoCount(auto_count)
+        self.set_useTags(useTags)
+        self.set_tagsQuery(tagsQuery)
+        self.set_tagValuesQuery(tagValuesQuery)
+    def _set_name_and_value(self, name, value):
+        if not isinstance(name, str):
+            try:
+                name = str(name)
+            except:
+                print "Name not stringifyable"
+                return False
+        if not isinstance(value, str):
+            try:
+                value = str(value)
+            except:
+                print "Value not stringifyable"
+                return False
         self.name = name
         self.value = value
-        self.allFormat = allFormat
-        self.refresh = refresh
-        self.options = options
-        self.current = current
-        self.datasource = datasource
-        self.tags = tags
-        self.type = type
-        self.multiFormat = multiFormat
-        self.includeAll = includeAll
-        self.validAllFormats = ["regex wildcard"]
-        self.validMultiFormats = ["regex values"]
-        self.validTypes = ["query", "interval", "custom"]
-    def _set_name_and_value(self, n, v):
-        if not isinstance(n, str):
-            try:
-                n = str(n)
-            except:
-                print "Name but by stringifyable"
-                return False
-        if not isinstance(v, str):
-            try:
-                v = str(v)
-            except:
-                print "Value but by stringifyable"
-                return False
-        self.name = n
-        self.value = v
         return True
-    def set_datasource(self, d):
-        self.datasource = d
-    def set_multi(self, b):
-        if isinstance(b, bool):
-            self.multi = b
-    def set_refresh(self, b):
-        if isinstance(b, bool):
-            self.refresh = b
-    def set_includeAll(self, b):
-        if isinstance(b, bool):
-            self.includeAll = b
-    def set_type(self, t):
-        if t in self.validTypes:
-            self.type = t
-    def set_allFormat(self, s):
-        if s in self.validAllFormats:
-            self.allFormat = s
-    def set_multiFormat(self, s):
-        if s in self.validMultiFormats:
-            self.multiFormat = s
-    def add_option(self, t):
-        if isinstance(t, list):
-            self.options = copy.deepcopy(t)
-            return True
-        elif isinstance(t, str):
-            self.options.append(t)
+    def set_useTags(self, useTags):
+        if isinstance(useTags, bool):
+            self.useTags = useTags
             return True
         return False
-    def add_tag(self, t):
-        if isinstance(t, list):
-            self.tags = copy.deepcopy(t)
+    def set_tagsQuery(self, tagsQuery):
+        if isinstance(tagsQuery, str):
+            self.tagsQuery = tagsQuery
             return True
-        elif isinstance(t, str):
-            self.tags.append(t)
+        return False
+    def set_tagValuesQuery(self, tagValuesQuery):
+        if isinstance(tagValuesQuery, str):
+            self.tagValuesQuery = tagValuesQuery
+            return True
+        return False
+    def set_label(self, label):
+        if label == None or isinstance(label, str):
+            self.label = label
+            return True
+        return False
+    def set_datasource(self, datasource):
+        if isinstance(datasource, str):
+            self.datasource = datasource
+            return True
+        return False
+    def set_multi(self, multi):
+        if isinstance(multi, bool):
+            self.multi = multi
+            return True
+        return False
+    def set_auto(self, auto):
+        if isinstance(auto, bool):
+            self.auto = auto
+            return True
+        return False
+    def set_autoCount(self, autoCount):
+        if autoCount == None or (isinstance(autoCount, int) and autoCount in self.validAutoCounts):
+            self.auto_count = autoCount
+            return True
+        return False
+    def set_hideLabel(self, hideLabel):
+        if isinstance(hideLabel, bool):
+            self.hideLabel = hideLabel
+            return True
+        return False
+    def set_refresh(self, refresh):
+        if isinstance(refresh, bool):
+            self.refresh = refresh
+            return True
+        return False
+    def set_includeAll(self, includeAll):
+        if isinstance(includeAll, bool):
+            self.includeAll = includeAll
+            return True
+        return False
+    def set_type(self, typ):
+        if typ in self.validTypes:
+            self.type = typ
+            return True
+        return False
+    def set_allFormat(self, allFormat):
+        if allFormat in self.validAllFormats:
+            self.allFormat = allFormat
+            return True
+        return False
+    def set_multiFormat(self, multiFormat):
+        if multiFormat in self.validMultiFormats:
+            self.multiFormat = multiFormat
+            return True
+        return False
+    def add_option(self, option):
+        if isinstance(option, list):
+            self.options = copy.deepcopy(option)
+            return True
+        elif isinstance(option, str):
+            self.options.append(option)
+            return True
+        return False
+    def add_tag(self, tag):
+        if isinstance(tag, list):
+            self.tags = copy.deepcopy(tag)
+            return True
+        elif isinstance(tag, str):
+            self.tags.append(tag)
             return True
         return False
     def get(self):
         q = self.value
-        if self.type == "query" and self.datasource == "influxdb":
+        if self.type == "query" and self.datasource == "influxdb" and not q.startswith("SHOW TAG VALUES WITH KEY"):
             q = "SHOW TAG VALUES WITH KEY = %s" % (self.value,)
             if len(self.tags) > 0:
                 l = []
@@ -1307,11 +1576,24 @@ class Template(object):
                         v += "$"
                     l.append("%s =~ /%s/" % (k, v))
                 q += " WHERE "+" AND ".join(l)
-        return {"multi" : self.multi, "name" : self.name, "allFormat" : self.allFormat,
+        elif self.type == "interval" or self.type == "custom":
+            q = str(self.value)
+        c = self.current
+        if len(c) == 0 and len(self.value.split(",")) > 0:
+            s = self.value.split(",")[0]
+            c = {"text" : str(s), "value" : str(s)}
+        d = {"multi" : self.multi, "name" : self.name, "allFormat" : self.allFormat,
                 "refresh" : self.refresh, "options" : self.options,
-                "current" : self.current, "datasource" : self.datasource,
+                "current" : c, "datasource" : self.datasource,
                 "query": q, "type" : self.type,
-                "multiFormat" : self.multiFormat, "includeAll" : self.includeAll}
+                "multiFormat" : self.multiFormat, "includeAll" : self.includeAll,
+                "refresh_on_load" : self.refresh, "hideLabel" : self.hideLabel,
+                "label" : self.label, "auto" : self.auto, "auto_count" : self.auto_count}#, ,
+        if self.type == "query" and self.useTags == True:
+            d.update({"useTags" : self.useTags,
+                      "tagsQuery" : self.tagsQuery,
+                      "tagValuesQuery" : self.tagValuesQuery})
+        return d
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
@@ -1334,11 +1616,28 @@ class Template(object):
         if j.has_key('refresh'):
             self.set_refresh(j['refresh'])
         if j.has_key('multiFormat'):
-            self.set_refresh(j['multiFormat'])
+            self.set_multiFormat(j['multiFormat'])
         if j.has_key('includeAll'):
-            self._set_includeAll(j['includeAll'])
+            self.set_includeAll(j['includeAll'])
         if j.has_key('multi'):
-            self._set_multi(j['multi'])
+            self.set_multi(j['multi'])
+        if j.has_key('label'):
+            self.set_label(j['label'])
+        if j.has_key('hideLabel'):
+            self.set_hideLabel(j['hideLabel'])
+        if j.has_key('auto'):
+            self.set_auto(j['auto'])
+        if j.has_key('auto_count'):
+            self.set_autoCount(j['auto_count'])
+        if j.has_key('useTags'):
+            self.set_useTags(j['useTags'])
+        if j.has_key('tagsQuery'):
+            self.set_tagsQuery(j['tagsQuery'])
+        if j.has_key('tagValuesQuery'):
+            self.set_tagValuesQuery(j['tagValuesQuery'])
+        if j.has_key('query'):
+            self.query(j['query'])
+
 
 class Timepicker(object):
     def __init__(self, time_options=['5m', '15m', '1h', '6h', '12h', '24h', '2d', '7d', '30d'],
