@@ -202,14 +202,6 @@ class Connection(object):
             print "Timeout for URL %s: %s" % (url,e,)
             print "Headers: %s" % (str(self.headers),)
             return 400, "Timeout for url %s: %s" % (url,e,), out
-        except requests.ProxyError as e:
-            print "ProxyError for URL %s: %s" % (url,e,)
-            print "Headers: %s" % (str(self.headers),)
-            return 400, "ProxyError for url %s: %s" % (url,e,), out
-        except requests.SSLError as e:
-            print "SSLError for URL %s: %s" % (url,e,)
-            print "Headers: %s" % (str(self.headers),)
-            return 400, "SSLError for url %s: %s" % (url,e,), out
         except requests.ConnectionError as e:
             print "ConnectionError for URL %s: %s" % (url,e,)
             print "Headers: %s" % (str(self.headers),)
@@ -241,14 +233,6 @@ class Connection(object):
             print "Timeout for URL %s: %s" % (url,e,)
             print "Headers: %s" % (str(self.headers),)
             return 400, "Timeout for url %s: %s" % (url,e,), out
-        except requests.ProxyError as e:
-            print "ProxyError for URL %s: %s" % (url,e,)
-            print "Headers: %s" % (str(self.headers),)
-            return 400, "ProxyError for url %s: %s" % (url,e,), out
-        except requests.SSLError as e:
-            print "SSLError for URL %s: %s" % (url,e,)
-            print "Headers: %s" % (str(self.headers),)
-            return 400, "SSLError for url %s: %s" % (url,e,), out
         except requests.ConnectionError as e:
             print "ConnectionError for URL %s: %s" % (url,e,)
             print "Headers: %s" % (str(self.headers),)
