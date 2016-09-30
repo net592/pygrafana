@@ -46,6 +46,7 @@ class Connection(object):
         self.username = username
         self.password = password
         self.timeout = timeout
+        self.grafana_version = None
         
         assert(self.apitoken or (self.username and self.password)), "Either API token or username/password required"
         if self.ssl:
@@ -63,6 +64,9 @@ class Connection(object):
                 self.headers.update({"Authorization" : "Basic %s" % base64string})
         
         self.connected = self.test_connection()
+        if self.is_connected():
+            d = self.get_settings()
+            self.grafana_version = d["buildInfo"]["version"]
     def __str__(self):
         s = "Grafana API connection:\n"
         s += "\tHostname: %s\n\tPort:%d\n"  % (self.hostname, self.port,)
@@ -89,20 +93,20 @@ class Connection(object):
                 try:
                     out = json.loads(resp.read())
                 except ValueError, e:
-                    print "Response from %s is no JSON document" (resp.geturl(),)
-                    print "Headers: %s" % (str(self.headers),)
+                    #print "Response from %s is no JSON document" (resp.geturl(),)
+                    #print "Headers: %s" % (str(self.headers),)
                     return resp.getcode(), "Response from %s is no JSON document" % (url,), out
             else:
-                print "Request to URL %s returns error code %d" % (resp.geturl(), resp.getcode(), )
-                print "Headers: %s" % (str(self.headers),)
+                #print "Request to URL %s returns error code %d" % (resp.geturl(), resp.getcode(), )
+                #print "Headers: %s" % (str(self.headers),)
                 return resp.getcode(), "Request to URL %s returns error code %d" % (resp.geturl(), resp.getcode(),), out
         except urllib2.URLError as e:
-            print "URLError for URL %s: %s" % (url,e.reason,)
-            print "Headers: %s" % (str(self.headers),)
+            #print "URLError for URL %s: %s" % (url,e.reason,)
+            #print "Headers: %s" % (str(self.headers),)
             return 400, "URLError for url %s: %s" % (url,e.reason,), out
         except Exception as e:
-            print "Exception for URL %s: %s" % (url,e,)
-            print "Headers: %s" % (str(self.headers),)
+            #print "Exception for URL %s: %s" % (url,e,)
+            #print "Headers: %s" % (str(self.headers),)
             return 400, "Exception for url %s: %s" % (url,e,), out
         return 200, "OK", out
     def _post_urllib2(self, url, data=""):
@@ -111,7 +115,7 @@ class Connection(object):
             data = json.dumps(data)
         else:
             try:
-                data = json.loads(data)
+                data = json.loads(str(data))
             except ValueError:
                 print "Input not a valid JSON document"
                 return 400, "Input not a valid JSON document", out
@@ -347,6 +351,8 @@ class Connection(object):
         return False
     def is_connected(self):
         return self.connected
+    def get_grafana_version(self):
+        return self.grafana_version
     def get_ds(self, org=None):
         if not self.connected:
             return self.empty_json
@@ -361,11 +367,17 @@ class Connection(object):
     def get_ds_by_name(self, dsname, org=None):
         if not self.connected:
             return self.empty_json
+        out = self.empty_json
+        err, estr, data = self._get(self.url+"datasources/name/%s" % (str(dsname),))
+        if err == 200:
+            out = data
+        else:
+            print estr
         dss = self.get_ds(org=org)
         for ds in dss:
             if ds.has_key("name") and ds["name"] == dsname:
-                return ds
-        return self.empty_json
+                out = ds
+        return out
     def get_ds_by_id(self, dsid, org=None):
         if not self.connected:
             return self.empty_json
@@ -410,10 +422,13 @@ class Connection(object):
         if typ and isinstance(typ, str):
             all_types = self.get_ds_types()
             avail = False
-            for k in all_types.keys():
-                if k.has_key("type") and k["type"] == typ:
-                    avail = True
-                    break
+            if len(all_types) > 0:
+                for k in all_types.keys():
+                    if k.has_key("type") and k["type"] == typ:
+                        avail = True
+                        break
+            elif grafana_version.startswith("3"):
+                avail= True
             if avail:
                 d.update({"type" : typ})
             else:
@@ -501,7 +516,7 @@ class Connection(object):
     def change_active_org(self, oid):
         if not self.connected:
             return False
-        err, estr, data = self._post(self.url+"user/using/%s" % (str(oid),))
+        err, estr, data = self._post(self.url+"user/using/%s" % (str(oid),), {})
         if err == 200:
             return True
         elif data.has_key("message"):

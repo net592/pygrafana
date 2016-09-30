@@ -4,6 +4,13 @@ import copy
 import json
 import re
 
+grafana_version = "2.6.1"
+
+def set_grafana_version(version):
+    if version and re.match("\d+\.\d+\.\d+", version):
+        global grafana_version
+        grafana_version = version
+
 # s (seconds), m (minutes), h (hours), d (days), w (weeks), M (months), y (years
 time_limits = { "s" : 60, "m" : 60, "h" : 24, "d" : 31, "w": 52, "M" : 12, "y" : 100}
 def check_timerange(t):
@@ -65,13 +72,19 @@ def check_color(c):
     return None
 
 target_id = 0
+def _get_next_target_refID():
+    global target_id
+    c = chr(ord('A') + target_id)
+    target_id += 1
+    return c
 
 class Target(object):
     """
     Encapsulates an query and evaluation target used in Grafana's panels
     """
     def __init__(self, measurement, dsType="influxdb", alias="", tags=[],
-                  groupBy=[], select=[], query="", resultFormat="time_series"):
+                  groupBy=[], select=[], query="", resultFormat="time_series",
+                  policy="default"):
         """
         Construct a new Target object
         
@@ -91,12 +104,12 @@ class Target(object):
         self.select = select
         self.measurement = measurement
         self.query = query
-        global target_id
-        self.refId = target_id
-        target_id += 1
+        self.policy = policy
+        self.refId = _get_next_target_refID()
         self.resultFormat = resultFormat
         self.validGroupBy = ['fill', 'time', 'tag']
         self.validResultFormat = ["time_series"]
+        self.grafana_version = grafana_version
     def get(self):
         """
         Returns a dictionary with the Target object's configuration. Performs some sanitation like removing duplicated groupBy options
@@ -104,51 +117,103 @@ class Target(object):
         
         :return dict with the Target object's settings
         """
+        global grafana_version
         t = None
         t = {}
         t["dsType"] = self.dsType
         t["tags"] = self.tags
-        t["groupBy"] = self.groupBy
+        #t["groupBy"] = self.groupBy
         t["alias"] = self.alias
-        t["select"] = self.select
+        t["select"] = [self.select]
         t["measurement"] = self.measurement
-        t["query"] = self.query
+        if grafana_version.startswith("2"):
+            t["query"] = self.query
         t["refId"] = self.refId
         t["resultFormat"] = self.resultFormat
-        grp_has_time = False
-        grp_has_fill = False
-        for g in self.groupBy:
-            if g["type"] == "time":
-                grp_has_time = True
-            elif g["type"] == "fill":
-                grp_has_fill = True
-        if not grp_has_time:
-            t["groupBy"].append({'type': 'time', 'params': ['$interval']})
-        if not grp_has_fill:
-            t["groupBy"].append({'type': 'fill', 'params': ['null']})
-        has_field = False
-        has_func = False
-        for s in self.select:
-            if s["type"] == "field":
-                has_field = True
-            if s["type"] != "field":
-                has_func = True
-        if not has_field:
-            t["select"].append({ "params": [ "value" ], "type": "field" })
-        if not has_func:
-            t["select"].append({ "params": [], "type": "mean" })
-        if len(self.query) == 0:
+
+        if grafana_version.startswith("3"):
+            t["policy"] = self.policy
+            grp_has_time = None
+            grp_has_fill = None
+            grpBy = []
+            for g in self.groupBy:
+                if g["type"] == "time":
+                    grp_has_time = g
+                elif g["type"] == "fill":
+                    grp_has_fill = g
+            if not grp_has_time:
+                grpBy.append({'type': 'time', 'params': ['$interval']})
+            else:
+                grpBy.append(grp_has_time)
+            for g in self.groupBy:
+                if g["type"] not in ("time", "fill"):
+                    grpBy.append(g)
+            if not grp_has_fill:
+                grpBy.append({'type': 'fill', 'params': ['null']})
+            else:
+                grpBy.append(grp_has_fill)
+
+            t["groupBy"] = grpBy
+            has_field = False
+            has_func = False
+            newselect = []
+            if len(self.select) > 0:
+                for s in self.select:
+                    news = []
+                    for elem in s:
+                        if elem["type"] == "field":
+                            has_field = True
+                            news.append(elem)
+                        if elem["type"] != "field":
+                            has_func = True
+                            news.append(elem)
+                    if not has_field:
+                        news.append({ "params": [ "value" ], "type": "field" })
+                    if not has_func:
+                        news.append({ "params": [], "type": "mean" })
+                    print news
+                    newselect.append(news)
+            else:
+                news = []
+                news.append({ "params": [ "value" ], "type": "field" })
+                news.append({ "params": [], "type": "mean" })
+                newselect.append(news)
+            t["select"] = newselect
+        else:
+            grp_has_time = False
+            grp_has_fill = False
+            for g in self.groupBy:
+                if g["type"] == "time":
+                    grp_has_time = True
+                elif g["type"] == "fill":
+                    grp_has_fill = True
+            if not grp_has_time:
+                t["groupBy"].append({'type': 'time', 'params': ['$interval']})
+            if not grp_has_fill:
+                t["groupBy"].append({'type': 'fill', 'params': ['null']})
+            has_field = False
+            has_func = False
+            for s in self.select:
+                if s["type"] == "field":
+                    has_field = True
+                if s["type"] != "field":
+                    has_func = True
+            if not has_field:
+                t["select"].append({ "params": [ "value" ], "type": "field" })
+            if not has_func:
+                t["select"].append({ "params": [], "type": "mean" })
+        if grafana_version.startswith("2") and len(self.query) == 0:
             field = "value"
             func = "mean"
             func_params = ""
-            for s in t["select"]:
+            for s in t["select"][0]:
                 if s["type"] == "field":
                     field = ",".join(s["params"])
                 else:
                     func = s["type"]
                     if len(s["params"]) > 0:
                         func_params = "," + ",".join(s["params"])
-            t["query"] = "SELECT %s (\\\"%s\\\"%s) FROM \\\"%s\\\" WHERE $timeFilter" % (func, field, func_params, self.measurement,)
+            t["query"] = "SELECT %s (\"%s\"%s) FROM \"%s\" WHERE $timeFilter" % (func, field, func_params, self.measurement,)
             filt = ""
             for s in t["tags"]:
                 op = s["operator"]
@@ -160,9 +225,9 @@ class Target(object):
                 
                 if op in ["=~", "!~"]:
                     if val[0] != "/":
-                        val = "/"+val
+                        val = "/^"+val
                     if val[-1] != "/":
-                        val += "/"
+                        val += "$/"
                 if s.has_key("condition"):
                     filt += "%s %s %s %s " % (s["condition"], key, op, val,)
                 else:
@@ -170,7 +235,6 @@ class Target(object):
             
             if len(filt) > 0:
                 t["query"] += " AND %s" % (filt,)
-        
         return t
     def get_json(self):
         """
@@ -307,7 +371,7 @@ class Target(object):
                 if g["type"] == grp_type:
                     g["params"] = grp_params
                     return True
-        d = {'type': grp_type, 'params': grp_params}
+        d = {'type': grp_type, 'params': [grp_params]}
         if d not in self.groupBy:
             self.groupBy.append(d)
             return True
@@ -332,6 +396,8 @@ class Target(object):
             self.set_dsType(j["dsType"])
         if j.has_key("query"):
             self.query = j["query"]
+        if j.has_key("policy"):
+            self.policy = j["policy"]
         if j.has_key("measurement"):
             self.measurement = j["measurement"]
         if j.has_key("tags"):
@@ -390,9 +456,11 @@ class Tooltip(object):
     """
     Encapsulates tooltip configuration used in Grafana's graph panels
     """
-    def __init__(self, shared=True, value_type="cumulative"):
+    def __init__(self, shared=True, value_type="cumulative", sort=0, msResolution=True):
         self.shared = shared
         self.value_type = value_type
+        self.sort = 0
+        self.msResolution = msResolution
         self.validValueTypes = ["cumulative"]
     def set_shared(self, s):
         if isinstance(s, bool):
@@ -402,8 +470,22 @@ class Tooltip(object):
             self.value_type = v
             return True
         return False
+    def set_sort(self, sort):
+        if isinstance(sort, int) and grafana_version.startswith("3"):
+            self.sort = sort
+            return True
+        return False
+    def set_msResolution(self, msResolution):
+        if isinstance(msResolution, bool) and grafana_version.startswith("3"):
+            self.msResolution = msResolution
+            return True
+        return False
     def get(self):
-        return {"shared" : self.shared, "value_type" : self.value_type}
+        if grafana_version.startswith("2"):
+            return {"shared" : self.shared, "value_type" : self.value_type}
+        else:
+            return {"shared" : self.shared, "value_type" : self.value_type,
+                    "sort" : self.sort, "msResolution" : self.msResolution}
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
@@ -494,11 +576,16 @@ class Grid(object):
         self.threshold1Color = check_color(threshold1Color)
         self.leftMin = leftMin
     def get(self):
-        return {"leftMax" : self.leftMax, "threshold2" : self.threshold2,
-                "rightLogBase" : self.rightLogBase, "rightMax" : self.rightMax,
-                "threshold1" : self.threshold1, "leftLogBase" : self.leftLogBase,
-                "threshold2Color" : self.threshold2Color, "rightMin" : self.rightMin,
-                "threshold1Color" : self.threshold1Color, "leftMin" : self.leftMin}
+        if grafana_version.startswith("2"):
+            return {"leftMax" : self.leftMax, "threshold2" : self.threshold2,
+                    "rightLogBase" : self.rightLogBase, "rightMax" : self.rightMax,
+                    "threshold1" : self.threshold1, "leftLogBase" : self.leftLogBase,
+                    "threshold2Color" : self.threshold2Color, "rightMin" : self.rightMin,
+                    "threshold1Color" : self.threshold1Color, "leftMin" : self.leftMin}
+        elif grafana_version.startswith("3"):
+            return {"threshold1" : self.threshold1, "threshold2" : self.threshold2,
+                    "threshold1Color" : self.threshold1Color,
+                    "threshold2Color" : self.threshold2Color}
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
@@ -556,6 +643,8 @@ class Panel(object):
             self.span = span
             return True
         return False
+    def set_datasource(self, datasource):
+        pass
     def get(self):
         return {}
     def get_json(self):
@@ -657,7 +746,7 @@ class TextPanel(Panel):
         return {"title" : self.title, "mode" : self.mode,
                 "content" : self.content, "style" : self.style,
                 "span" : self.span, "editable": self.editable,
-                "id": self.id, "type" : self.type,"error": self.error,
+                "id": self.id, "type" : self.type, "error": self.error,
                 "links" : self.links, "transparent" : self.transparent,
                 "repeat" : self.repeat, "minSpan" : self.minSpan}
     def get_json(self):
@@ -740,6 +829,7 @@ class PlotPanel(Panel):
     def add_target(self, t):
         if isinstance(t, Target):
             x = copy.deepcopy(t)
+            x.set_refId(chr(ord('A')+len(self.targets)))
             self.targets.append(x)
     def get(self):
         return {"datasource" : self.datasource, "title" : self.title,
@@ -881,7 +971,7 @@ class SeriesOverride(object):
 
 class GraphPanel(PlotPanel):
     def __init__(self, bars=False, links=[], isNew=True, nullPointMode="connected",
-                       renderer="flot", linewidth=2, steppedLine=False, fill=0,
+                       renderer="flot", linewidth=2, steppedLine=False, fill=1,
                        span=12, title="", tooltip=Tooltip(), targets=[],
                        seriesOverrides=[], percentage=False, xaxis=True,
                        error=False, editable=True, stack=False, yaxis=True,
@@ -897,7 +987,7 @@ class GraphPanel(PlotPanel):
                               'celsius', 'farenheit', 'humidity',
                               'pressurembar', 'pressurehpa',
                               'velocityms', 'velocitykmh', 'velocitymph', 'velocityknot']
-        self.validNullPointMode = ["connected", 'null as zero', 'null']
+        self.validNullPointModes = ["connected", 'null as zero', 'null']
         self.validRenderer = ["png", "flot"]
         PlotPanel.__init__(self, title=title, isNew=isNew, targets=targets, links=links,
                          datasource=datasource, error=error, span=span, editable=editable)
@@ -931,11 +1021,12 @@ class GraphPanel(PlotPanel):
             left = y_formats[0]
         if len(y_formats) > 1:
             right = y_formats[1]
+        self.y_formats = ()
         self.set_y_formats(left, right)
         self.leftYAxisLabel = leftYAxisLabel
         self.rightYAxisLabel = rightYAxisLabel
     def set_nullPointMode(self, m):
-        if m in self.validNullPointMode:
+        if m in self.validNullPointModes:
             self.nullPointMode = m
             return True
         return False
@@ -1022,15 +1113,15 @@ class GraphPanel(PlotPanel):
     def set_y_formats(self, left, right):
         retl = False
         retr = False
-        if not self.y_formats:
-            self.y_formats= ('short', 'short')
+        newfmts = ['short', 'short']
         if left in self.validYFormats:
-            self.y_formats[0] = left
+            newfmts[0] = left
             retl = True
         if right in self.validYFormats:
-            self.y_formats[1] = right
+            newfmts[1] = right
             retr = True
-        return ret
+        self.y_formats= tuple(newfmts)
+        return retl and retr
     def set_pointradius(self, b):
         if isinstance(b, int):
             self.pointradius = b
@@ -1044,9 +1135,7 @@ class GraphPanel(PlotPanel):
     def set_rightYAxisLabel(self, l):
         self.rightYAxisLabel = str(l)
     def get(self):
-        yfmt = ["short","short"]
-        if len(self.y_formats) > 0:
-            yfmt = self.y_formats
+        
         g = {"bars" : self.bars, "timeFrom" : self.timeFrom, "links" : self.links,
                 "isNew" : self.isNew, "nullPointMode" : self.nullPointMode,
                 "renderer" : self.renderer, "linewidth" : self.linewidth,
@@ -1054,19 +1143,213 @@ class GraphPanel(PlotPanel):
                 "span" : self.span, "title" : self.title, "tooltip" : self.tooltip.get(),
                 "targets" : [ t.get() for t in self.targets], "grid" : self.grid.get(),
                 "seriesOverrides" : self.seriesOverrides, "percentage" : self.percentage,
-                "type" : self.type, "x-axis" : self.xaxis, "error" : self.error,
+                "type" : self.type, "error" : self.error,
                 "editable" : self.editable, "legend" : self.legend.get(), "stack" : self.stack,
-                "y-axis" : self.yaxis, "timeShift" : self.timeShift,
+                "timeShift" : self.timeShift,
                 "aliasColors" : self.aliasColors, "lines" : self.lines,
                 "points" : self.points, "datasource" : self.datasource,
-                "pointradius" : self.pointradius, "y_formats" : yfmt,
-                "transparent" : self.transparent}
-        if self.leftYAxisLabel:
-            g.update({"leftYAxisLabel" : self.leftYAxisLabel})
-        if self.rightYAxisLabel:
-            g.update({"rightYAxisLabel" : self.rightYAxisLabel})
+                "pointradius" : self.pointradius}
+        if self.transparent:
+            g.update({"transparent" : self.transparent})
+        
+        if grafana_version.startswith("2"):
+            if self.leftYAxisLabel:
+                g.update({"leftYAxisLabel" : self.leftYAxisLabel})
+            if self.rightYAxisLabel:
+                g.update({"rightYAxisLabel" : self.rightYAxisLabel})
+            yfmt = ["short","short"]
+            if len(self.y_formats) > 0:
+                yfmt = self.y_formats
+            g.update({"y_formats" : yfmt, "x-axis" : self.xaxis, "y-axis" : self.yaxis})
+        elif grafana_version.startswith("3"):
+            g.update({"xaxis" : { "show" : self.xaxis}})
+            lfmt = "short"
+            if len(self.y_formats) > 0:
+                lfmt = self.y_formats[0]
+            lefty = {"show" : self.yaxis, "logBase" : self.grid.leftLogBase,
+                     "max" : self.grid.leftMax, "min" : self.grid.leftMin,
+                     "format" : lfmt}
+            if self.leftYAxisLabel:
+                lefty.update({"label" : self.leftYAxisLabel})
+            else:
+                lefty.update({"label" : None})
+            rfmt = "short"
+            if len(self.y_formats) > 1:
+                rfmt = self.y_formats[1]
+            righty = {"show" : self.yaxis, "logBase" : self.grid.rightLogBase,
+                     "max" : self.grid.rightMax, "min" : self.grid.rightMin,
+                     "format" : rfmt}
+            if self.rightYAxisLabel:
+                righty.update({"label" : self.rightYAxisLabel})
+            else:
+                righty.update({"label" : None})
+            g.update({"yaxes" : [lefty, righty]})
         return g
-    
+
+class PiePanel(PlotPanel):
+    def __init__(self, title, isNew=True, targets=[], links=[], datasource="",
+                 error=False, span=12, editable=True, aliasColors={}, cacheTimeout=None,
+                 fontSize="80%", format="short", interval=None, legendType="Under graph",
+                 maxDataPoints=3, nullPointMode="connected", strokeWidth=1, valueName="current",
+                 legend=Legend()):
+        self.validYFormats = ['bytes', 'kbytes', 'mbytes', 'gbytes', 'bits',
+                              'bps', 'Bps', 'short', 'joule', 'watt', 'kwatt',
+                              'watth', 'ev', 'amp', 'volt'
+                              'none', 'percent', 'ppm', 'dB', 'ns', 'us',
+                              'ms', 's', 'hertz', 'pps',
+                              'celsius', 'farenheit', 'humidity',
+                              'pressurembar', 'pressurehpa',
+                              'velocityms', 'velocitykmh', 'velocitymph', 'velocityknot']
+        self.validLegendTypes = ["Under graph"]
+        self.validNullPointModes = ["connected", 'null as zero', 'null']
+        PlotPanel.__init__(self, title=title, isNew=isNew, targets=targets, links=links,
+                         datasource=datasource, error=error, span=span, editable=editable)
+        self.type = "grafana-piechart-panel"
+        self.pieType = "pie"
+        self.set_aliasColors(aliasColors)
+        self.set_cacheTimeout(cacheTimeout)
+        self.set_fontSize(fontSize)
+        self.set_format(format)
+        self.set_interval(interval)
+        self.set_legendType(legendType)
+        self.set_maxDataPoints(maxDataPoints)
+        self.set_nullPointMode(nullPointMode)
+        self.set_strokeWidth(strokeWidth)
+        
+    def set_aliasColors(self, aliasColors):
+        if isinstance(aliasColors, dict):
+            self.aliasColors = aliasColors
+            return True
+        return False
+    def set_cacheTimeout(self, cacheTimeout):
+        if cacheTimeout == None or isinstance(cacheTimeout, int):
+            self.cacheTimeout = cacheTimeout
+            return True
+        return False
+    def set_fontSize(self, fontSize):
+        if re.match("\d+%", fontSize):
+            self.fontSize = fontSize
+            return True
+        return False
+    def set_format(self, fmt):
+        if fmt in self.validYFormats:
+            self.format = fmt
+            return True
+        return False
+    def set_interval(self, interval):
+        if interval == None or isinstance(interval, int):
+            self.interval = interval
+            return True
+        return  False
+    def set_legendType(self, legendType):
+        if legendType in self.validLegendTypes:
+            self.legendType = legendType
+            return True
+        return False
+    def set_maxDataPoints(self, maxDataPoints):
+        if isinstance(maxDataPoints, int):
+            self.maxDataPoints = maxDataPoints
+            return True
+        return False
+    def set_nullPointMode(self, nullPointMode):
+        if nullPointMode in self.validNullPointModes:
+            self.nullPointMode = nullPointMode
+            return True
+        return False
+    def set_strokeWidth(self, strokeWidth):
+        if isinstance(strokeWidth, int) and strokeWidth > 0:
+            self.strokeWidth = strokeWidth
+            return True
+        return False
+    def set_valueName(self, valueName):
+        if isinstance(valueName, str):
+            self.valueName = valueName
+            return True
+        return False
+    def set_legend(self, legend):
+        if isinstance(legend, Legend):
+            self.legend = legend
+        else:
+            raise ValueError
+    def get(self):
+        d = {
+          "aliasColors": self.aliasColors,
+          "cacheTimeout": self.cacheTimeout,
+          "datasource": self.datasource,
+          "editable": self.editable,
+          "error": self.error,
+          "fontSize": self.fontSize,
+          "format": self.format,
+          "id": 1,
+          "interval": self.interval,
+          "isNew": self.isNew,
+          "legend": self.legend.get(),
+          "legendType": self.legendType,
+          "links": self.links,
+          "maxDataPoints": self.maxDataPoints,
+          "nullPointMode": self.nullPointMode,
+          "pieType": self.pieType,
+          "span": self.span,
+          "strokeWidth": self.strokeWidth,
+          "targets": self.targets,
+          "title": self.title,
+          "type": self.type,
+          "valueName": self.valueName
+        }
+        return d
+    def get_json(self):
+        return json.dumps(self.get())
+    def __str__(self):
+        return str(self.get())
+    def __repr__(self):
+        return str(self.get())
+    def read_json(self, j):
+        if not isinstance(j, dict):
+            j = json.loads(j)
+        if j.has_key("aliasColors"):
+            self.set_aliasColors(j["aliasColors"])
+        if j.has_key("cacheTimeout"):
+            self.set_cacheTimeout(j["cacheTimeout"])
+        if j.has_key("datasource"):
+            self.set_datasource(j["datasource"])
+        if j.has_key("editable"):
+            self.set_editable(j["editable"])
+        if j.has_key("error"):
+            self.set_error(j["error"])
+        if j.has_key("fontSize"):
+            self.set_fontSize(j["fontSize"])
+        if j.has_key("format"):
+            self.set_format(j["format"])
+        if j.has_key("interval"):
+            self.set_interval(j["interval"])
+        if j.has_key("isNew"):
+            self.set_isNew(j["isNew"])
+        if j.has_key("legend"):
+            self.set_legend(Legend().read_json(j["legend"]))
+        if j.has_key("legendType"):
+            self.set_legendType(j["legendType"])
+        if j.has_key("maxDataPoints"):
+            self.set_maxDataPoints(j["maxDataPoints"])
+        if j.has_key("nullPointMode"):
+            self.set_nullPointMode(j["nullPointMode"])
+        if j.has_key("span"):
+            self.set_span(j["span"])
+        if j.has_key("strokeWidth"):
+            self.set_strokeWidth(j["strokeWidth"])
+        if j.has_key("title"):
+            self.set_title(j["title"])
+        if j.has_key("valueName"):
+            self.set_valueName(j["valueName"])
+        if j.has_key("links"):
+            for l in j["links"]:
+                self.add_link(l)
+        if j.has_key("targets"):
+            for t in j["targets"]:
+                target = Target("").read_json(t)
+                self.add_target(target)
+        
+
+
 class Gauge(object):
     def __init__(self, maxValue=None, minValue=None, show=None, thresholdLabels=None, thresholdMarkers=None):
         self.maxValue = maxValue
@@ -1683,8 +1966,8 @@ class Dashboard(object):
     def __init__(self, title, style='dark', rows=[], links=[], tags=[], hideControls=False,
                        editable=True, originalTitle="", timepicker=Timepicker(),
                        refresh='10s', sharedCrosshair=False, timezone='browser',
-                       schemaVersion=8, overwrite=False, templates=[], annotations=[],
-                       startTime="now-6h", endTime="now"):
+                       schemaVersion=0, overwrite=False, templates=[], annotations=[],
+                       startTime="now-6h", endTime="now", gnetId=None):
         global dashboard_id
         self.id = dashboard_id
         dashboard_id += 1
@@ -1706,7 +1989,15 @@ class Dashboard(object):
         self.overwrite = overwrite
         self.startTime = startTime
         self.endTime = endTime
+        self.gnetId = gnetId
+        self.slug = self.title.lower().replace(" ", "-").replace("_","-")
         self.validStyles = ["light", "dark"]
+        if grafana_version.startswith("2"):
+            self.schemaVersion = 8
+        elif grafana_version.startswith("3"):
+            self.schemaVersion = 12
+    def get_slug(self):
+        return self.slug
     def add_template(self, t):
         if isinstance(t, Template):
             x = copy.deepcopy(t)
@@ -1788,6 +2079,15 @@ class Dashboard(object):
                 return False
         self.version = v
         return True
+    def set_schemaVersion(self, v):
+        if not isinstance(v, int):
+            try:
+                v = int(v)
+            except ValueError:
+                print "Input parameter %s must be castable to integer" % (v,)
+                return False
+        self.schemaVersion = v
+        return True
     def set_timezone(self, t):
         if not isinstance(t, str):
             try:
@@ -1800,6 +2100,11 @@ class Dashboard(object):
     def set_style(self, s):
         if s in self.validStyles:
             self.style = s
+    def set_gnetId(self, gnetId):
+        if gnetId == None or isinstance(gnetId, int):
+            self.gnetId = gnetId
+            return True
+        return False
     def set_startTime(self, t):
         # check time
         if isinstance(t, str):
@@ -1816,7 +2121,7 @@ class Dashboard(object):
         origTitle = self.originalTitle
         if not origTitle:
             origTitle = self.title
-        return {'dashboard': {'version': 0, 'style': self.style, 'rows': [ r.get() for r in self.rows ],
+        d = {'dashboard': {'version': 0, 'style': self.style, 'rows': [ r.get() for r in self.rows ],
                 'templating': {'list': [ t.get() for t in self.templates] }, 'links': self.links,
                 'tags': self.tags, 'hideControls': self.hideControls,
                 'title': self.title, 'editable': self.editable, 'id': self.id,
@@ -1825,6 +2130,9 @@ class Dashboard(object):
                 'time': {'to': self.endTime, 'from': self.startTime}, 'timezone': self.timezone,
                 'schemaVersion': 8, 'annotations': {'list': self.annotations}},
                 'overwrite': self.overwrite}
+        #if grafana_version.startswith("3"):
+        #    d.update({"gnetId" : self.gnetId})
+        return d
     def get_json(self):
         return json.dumps(self.get())
     def __str__(self):
