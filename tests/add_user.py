@@ -14,7 +14,7 @@ if not con.is_connected:
 print con
 uid = con.get_uid(username)
 if uid < 0:
-    if con.add_user(login=username, password=password):
+    if con.admin_add_user(login=username, password=password):
         uid = con.get_uid(username)
         print "User %s created with ID %d" % (username, uid,)
     else:

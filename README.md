@@ -37,34 +37,55 @@ Almost all class options can be set at init but also afterwards by `set_<option>
 I use InfluxDB as backend for Grafana. Therefore, I don't know whether the Target class fits for other backends. I will test the others as soon as I have time.
 
 # Example
+## Generate dashboard
 ```
 from pygrafana.dashboard import Target, Graph, Row, Dashboard
 from pygrafana.api import Connection
 
-# Create a database query target
-t = Target("testmetric", alias="Testmetric [[tag_host]]")
-# Add a Tag to the query target
-t.add_tag("host", "$hostname", operator="=~") # automatically adds '/' when operator uses regex
-# Create a graph panel displaying the single Target
-g = GraphPanel(targets=[t])
-# use set functions to enable transparency
-g.set_transparent(True)
-# Create a row for the graph panel
-r = Row("Testmetric Row")
-# Add the graph panel to the row
-r.add_panel(g)
-# Create a dashboard
-d = Dashboard("Test Dashboard")
-# Add row
-d.add_row(r)
-# sets datasource of all targets and templates in dashboard
-d.set_datasource("myDS") 
-# Get JSON of dashboard
-res = d.get_json() 
-# Get dict of dashboard
-res = d.get()
 # Establish connection to Grafana
 con = Connection("localhost", 3000, "testuser", "testpass")
-# Add dashboards tags JSON documents or Dashboard objects
-print con.add_dashboard(d)
+if not con.is_connected:
+    print "Cannot establish connection"
+# Get Grafana version
+ver = c.get_grafana_version()
+# set Grafana version for proper dashboard generation
+gdash.set_grafana_version(ver)
+
+
+# Create a database query target
+target = Target("testmetric", alias="Testmetric [[tag_host]]")
+# Add a Tag to the query target
+target.add_tag("host", "$hostname", operator="=~") # automatically adds '/' when operator uses regex
+# Create a graph panel displaying the single Target
+graph = GraphPanel(targets=[target])
+# use set functions to enable transparency
+graph.set_transparent(True)
+# Create a row for the graph panel
+row = Row("Testmetric Row")
+# Add the graph panel to the row
+row.add_panel(graph)
+# Create a dashboard
+dashboard = Dashboard("Test Dashboard")
+# Add row
+dashboard.add_row(row)
+# sets datasource of all targets and templates in dashboard
+dashboard.set_datasource("myDS") 
+# Get JSON of dashboard
+res = dashboard.get_json() 
+# Get dict of dashboard
+res = dashboard.get()
+
+# Add dashboard to Grafana
+# d can be a JSON document or a pygrafana Dashboard object
+print con.add_dashboard(dashboard)
+```
+## Add user to Grafana
+```
+from pygrafana.api import Connection
+# Establish connection to Grafana
+con = Connection("localhost", 3000, "testuser", "testpass")
+if not con.is_connected:
+    print "Cannot establish connection"
+con.admin_add_user(login="testuser", password="testpass")
+uid = con.get_uid("testuser")
 ```
