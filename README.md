@@ -9,7 +9,7 @@ In order to update the dashboards in Grafana and to do manangement stuff, I adde
 
 I tested the API interface and the dashboard builder with Grafana 2.1.3 and 3.1.1. It was originally written for 2.1.3. With the support for 3.x.x the classes do not fit the output JSON to 100% anymore. An example would be the Grid class for y axes limits which moved to the panels in 3.x.x. The changes are handled internally, you still have to use the Grid class for 3.x.x.
 
-For communication with Grafana, the module uses the [Requests](http://de.python-requests.org/de/latest/) module if available. If not, it fallbacks to urllib2 with an extension to send other requrests than GET and POST.
+For communication with Grafana, the module uses the [Requests](http://de.python-requests.org/de/latest/) module if available. If not, it falls back to urllib2 with an extension to send other requrests than GET and POST.
 
 # Current classes
 - Target
