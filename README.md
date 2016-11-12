@@ -39,7 +39,7 @@ I use InfluxDB as backend for Grafana. Therefore, I don't know whether the Targe
 # Example
 ## Generate dashboard
 ```
-from pygrafana.dashboard import Target, Graph, Row, Dashboard
+from pygrafana.dashboard import Target, GraphPanel, Row, Dashboard
 from pygrafana.api import Connection
 
 # Establish connection to Grafana
@@ -47,9 +47,9 @@ con = Connection("localhost", 3000, "testuser", "testpass")
 if not con.is_connected:
     print "Cannot establish connection"
 # Get Grafana version
-ver = c.get_grafana_version()
+ver = con.get_grafana_version()
 # set Grafana version for proper dashboard generation
-gdash.set_grafana_version(ver)
+pygrafana.dashboard.set_grafana_version(ver)
 
 
 # Create a database query target
